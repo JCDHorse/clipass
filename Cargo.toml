@@ -1,0 +1,11 @@
+[package]
+name = "clipass"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8" # Pour générer le sel (salt) et le nonce
