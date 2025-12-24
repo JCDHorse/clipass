@@ -78,7 +78,7 @@ impl Clipass {
     pub fn list(&self) -> Result<String, ClipassError> {
         let mut listing = String::new();
         for entry in self.vault.get_all() {
-            listing.push_str(format!("- {}: {}\n", entry.0, entry.1).as_str());
+            listing.push_str(format!("- {}: ******\n", entry.0).as_str());
         }
         Ok(listing.to_string())
     }

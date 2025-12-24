@@ -9,7 +9,7 @@ where
     T: FromStr, // The return type need to be cast from a str
     // The return error can be converted from io::Error for flush and from T::Err for parse
     ClipassError: From<io::Error> + From<T::Err>,
-    <T as FromStr>::Err: std::fmt::Display
+    <T as FromStr>::Err: std::fmt::Display,
 {
     loop {
         let mut line = String::new();

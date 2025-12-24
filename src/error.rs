@@ -1,5 +1,5 @@
 use std::fmt;
-use std::fmt::{write, Formatter};
+use std::fmt::{format, Formatter};
 use std::io::{Error, ErrorKind};
 use std::convert::Infallible;
 use std::num::ParseIntError;
@@ -8,19 +8,27 @@ use std::num::ParseIntError;
 pub enum ClipassError {
     NotFound,
     InvalidCommand(String),
-    Io(std::io::Error),
+    Io(String),
     IdExists(String),
     Input(String),
+    GenericError(String),
+    Argon2Error(String),
+    CryptoError(String),
+    SerdeError(String),
 }
 
 impl fmt::Display for ClipassError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ClipassError::NotFound => write!(f, "unfindable entry"),
-            ClipassError::InvalidCommand(cmd) => write!(f, "invalid command: {}", cmd),
-            ClipassError::Io(err) => write!(f, "io error: {}", err),
+            ClipassError::InvalidCommand(cmd) => write!(f, "invalid command: {cmd}"),
+            ClipassError::Io(err) => write!(f, "io error: {err}"),
             ClipassError::IdExists(id) => write!(f, "id exists already: {id}"),
-            ClipassError::Input(input) => write!(f, "input error: {input}")
+            ClipassError::Input(input) => write!(f, "input error: {input}"),
+            ClipassError::GenericError(err) => write!(f, "unknown error: {err}"),
+            ClipassError::Argon2Error(err) => write!(f, "argon2 error: {err}"),
+            ClipassError::CryptoError(err) => write!(f, "crypto error: {err}"),
+            ClipassError::SerdeError(err) => write!(f, "serde error: {err}"),
         }
     }
 }
@@ -29,24 +37,7 @@ impl std::error::Error for ClipassError {}
 
 impl From<std::io::Error> for ClipassError {
     fn from(value: Error) -> Self {
-        ClipassError::Io(value)
-    }
-}
-
-impl From<ClipassError> for std::io::Error {
-    fn from(value: ClipassError) -> Self {
-        match value {
-            ClipassError::Io(err)
-                => err,
-            ClipassError::InvalidCommand(cmd)
-                => Error::new(ErrorKind::NotFound, format!("{cmd}")),
-            ClipassError::NotFound
-                => Error::new(ErrorKind::NotFound, "Not found".to_string()),
-            ClipassError::IdExists(id)
-                => Error::new(ErrorKind::InvalidInput, format!("{id}")),
-            ClipassError::Input(input)
-                => Error::new(ErrorKind::InvalidInput, format!("input error: {input}"))
-        }
+        ClipassError::Io(format!("{value}"))
     }
 }
 
@@ -61,5 +52,17 @@ impl From<Infallible> for ClipassError {
 impl From<ParseIntError> for ClipassError {
     fn from(value: ParseIntError) -> Self {
         ClipassError::Input(value.to_string())
+    }
+}
+
+impl From<Box<dyn std::error::Error>> for ClipassError {
+    fn from(value: Box<dyn std::error::Error>) -> Self {
+        ClipassError::GenericError(format!("{value}"))
+    }
+}
+
+impl From<argon2::Error> for ClipassError {
+    fn from(value: argon2::Error) -> Self {
+        ClipassError::Argon2Error(format!("{value}"))
     }
 }
