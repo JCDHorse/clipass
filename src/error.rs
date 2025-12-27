@@ -6,7 +6,7 @@ use std::num::ParseIntError;
 
 #[derive(Debug)]
 pub enum ClipassError {
-    NotFound,
+    NotFound(String),
     InvalidCommand(String),
     Io(String),
     IdExists(String),
@@ -20,7 +20,7 @@ pub enum ClipassError {
 impl fmt::Display for ClipassError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            ClipassError::NotFound => write!(f, "unfindable entry"),
+            ClipassError::NotFound(s) => write!(f, "unfindable entry {s}"),
             ClipassError::InvalidCommand(cmd) => write!(f, "invalid command: {cmd}"),
             ClipassError::Io(err) => write!(f, "io error: {err}"),
             ClipassError::IdExists(id) => write!(f, "id exists already: {id}"),
@@ -60,9 +60,26 @@ impl From<Box<dyn std::error::Error>> for ClipassError {
         ClipassError::GenericError(format!("{value}"))
     }
 }
+impl From<serde_json::Error> for ClipassError {
+    fn from(value: serde_json::Error) -> Self {
+        ClipassError::SerdeError(format!("{value}"))
+    }
+}
 
 impl From<argon2::Error> for ClipassError {
     fn from(value: argon2::Error) -> Self {
         ClipassError::Argon2Error(format!("{value}"))
+    }
+}
+
+impl From<aes_gcm::Error> for ClipassError {
+    fn from(value: aes_gcm::Error) -> Self {
+        ClipassError::CryptoError(format!("{}", value))
+    }
+}
+
+impl From<argon2::password_hash::Error> for ClipassError {
+    fn from(value: argon2::password_hash::Error) -> Self {
+        ClipassError::CryptoError(format!("{value}"))
     }
 }
