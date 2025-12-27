@@ -1,6 +1,6 @@
 use std::fmt::Display;
 use std::io;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::str::FromStr;
 use crate::error::ClipassError;
 
@@ -11,17 +11,27 @@ where
     ClipassError: From<io::Error> + From<T::Err>,
     <T as FromStr>::Err: std::fmt::Display,
 {
+    input_read_with(ask_msg, &mut io::stdin(), &mut io::stdout())
+}
+pub fn input_read_with<T, R, W>(ask_msg: &str, reader: &mut R, writer: &mut W) -> Result<T, ClipassError>
+where
+    T: FromStr,
+    R: Read,
+    W: Write,
+    ClipassError: From<io::Error> + From<T::Err>,
+    <T as FromStr>::Err: std::fmt::Display,
+{
+    use std::io::BufRead;
+    let mut buf_reader = io::BufReader::new(reader);
     loop {
         let mut line = String::new();
-        print!("{}", ask_msg);
-        io::stdout().flush()?;
-        io::stdin().read_line(&mut line)?;
-        io::stdout().flush()?;
+        writer.write_all(ask_msg.as_bytes())?;
+        writer.flush()?;
+        buf_reader.read_line(&mut line)?;
+        writer.flush()?;
         match line.trim().parse() {
             Ok(v) => return Ok(v),
-            Err(e) => {
-                eprintln!("invalid input {} ({})", line.trim(), e);
-            }
+            Err(e) => eprintln!("invalid input {} ({})", line.trim(), e),
         }
     }
 }
