@@ -1,34 +1,37 @@
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
-use std::io::Write;
-use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
-use aes_gcm::aead::Aead;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
+use aes_gcm::Nonce;
 use aes_gcm::aead::rand_core::RngCore;
-use argon2::Argon2;
+use argon2::password_hash::{Salt, SaltString};
 use rand::thread_rng;
-use serde::{Deserialize, Serialize};
+
 use crate::error::ClipassError;
+use crate::crypto;
+use crate::crypto::Key;
 
-const SALT_SIZE: usize = 16;
+const SALT_SIZE: usize = 32;
+const NONCE_SIZE: usize = 12;
 
-#[derive(Serialize, Deserialize, Debug)]
 pub struct Vault {
     entries: HashMap<String, String>,
-    salt: [u8; SALT_SIZE],
+    salt: SaltString,
+    key: crypto::Key,
 }
 
 impl Vault {
-    pub fn new(init_salt: Option<[u8; 16]>) -> Self {
-        let mut salt: [u8; SALT_SIZE];
-        if init_salt.is_none() {
-            salt = [0u8; SALT_SIZE];
-            thread_rng().fill_bytes(&mut salt);
-        }
-        else {
-            salt = init_salt.unwrap();
-        }
-        Self { entries: HashMap::new(), salt }
+    pub fn new_empty(master_password: &str) -> Result<Self, ClipassError> {
+        let mut salt_bytes = [0u8; 32];
+        thread_rng().fill_bytes(&mut salt_bytes);
+        let salt = SaltString::encode_b64(&salt_bytes)?;
+        let key = crypto::derive_key(master_password, &salt)?;
+        Ok(Self {entries: HashMap::new(), salt, key})
+    }
+
+    pub fn new(entries: HashMap<String, String>, salt: SaltString, key: Key) -> Self {
+        Self { entries, salt, key }
     }
 
     pub fn new_entry(&mut self, key: &str, value: &str)
@@ -41,13 +44,22 @@ impl Vault {
         Ok(())
     }
 
+    pub fn delete_entry(&mut self, key: &str)
+        -> Result<(), ClipassError>
+    {
+        match self.entries.remove_entry(key) {
+            Some(v) => Ok(()),
+            None => Err(ClipassError::NotFound(key.to_string())),
+        }
+    }
+
     pub fn contains_key(&self, key: &str) -> bool {
         self.entries.contains_key(key)
     }
 
     pub fn get_value(&self, key: &str) -> Result<&String, ClipassError> {
         match self.entries.get(key) {
-            None => Err(ClipassError::NotFound),
+            None => Err(ClipassError::NotFound(key.to_string())),
             Some(v) => Ok(v),
         }
     }
@@ -56,44 +68,29 @@ impl Vault {
         &self.entries
     }
 
-    #[cfg(debug_assertions)]
-    pub fn save_to_file(&self, master_password: &str, path: &str)
-        -> Result<(), Box<dyn std::error::Error>>
-    {
-        let mut file = File::create(path)?;
-        let serialized = serde_json::to_string(self)?;
-        file.write(serialized.as_bytes())?;
+    pub fn update(&mut self, key: &str, value: &str) -> Result<(), ClipassError> {
+        let value_ref = match self.entries.get_mut(key) {
+            None => return Err(ClipassError::NotFound(key.to_string())),
+            Some(v) => v,
+        };
+        *value_ref = value.to_string();
         Ok(())
     }
 
-    pub fn crypt_to_file(&self, master_password: &str, path: &str) -> Result<(), ClipassError> {
-        // 1. Préparation des données
-        let json_data = serde_json::to_vec(self).map_err(|e| ClipassError::SerdeError(format!("{e}")))?;
+    pub fn crypt_to_file(&self, path: &str) -> Result<(), ClipassError> {
+        let entries_json = serde_json::to_vec(&self.entries)?;
 
-        // 2. Dérivation de la clé (KDF)
-        let salt = self.salt;
-        let mut key_bytes = [0u8; 32];
-        Argon2::default().hash_password_into(master_password.as_bytes(), &salt, &mut key_bytes)?;
-        let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+        let mut salt_bytes = [0u8; SALT_SIZE];
+        self.salt.decode_b64(&mut salt_bytes)?;
 
-        // 3. Chiffrement
-        let cipher = Aes256Gcm::new(key);
-        let mut nonce_bytes = [0u8; 12];
-        thread_rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        let ciphertext = cipher.encrypt(nonce, json_data.as_ref())
-            .map_err(|e| ClipassError::CryptoError(format!("Erreur de chiffrement : {}", e)))?;
-
-        // 4. Stockage (On concatène Nonce + Ciphertext pour pouvoir déchiffrer plus tard)
-        // Fichier = [SALT (16)] + [NONCE (12)] + [DONNÉES CHIFFRÉES]
-        let mut final_data = Vec::with_capacity(SALT_SIZE + 12 + ciphertext.len());
-        final_data.extend_from_slice(&self.salt);     // On ajoute le sel en clair
-        final_data.extend_from_slice(&nonce_bytes);   // On ajoute le nonce en clair
-        final_data.extend_from_slice(&ciphertext);    // On ajoute le secret
+        let (ciphertext, nonce) =
+            crypto::encrypt_data(&self.key, &entries_json)?;
 
         let mut file = File::create(path)?;
-        file.write_all(&final_data)?;
+
+        file.write_all(&salt_bytes)?;
+        file.write_all(&nonce)?;
+        file.write_all(&ciphertext)?;
 
         Ok(())
     }
@@ -105,38 +102,24 @@ impl Vault {
         let data = fs::read(path)?;
 
         // Vérification de la taille minimale (16 sel + 12 nonce)
-        if data.len() < (SALT_SIZE + 12) {
+        if data.len() < (SALT_SIZE + NONCE_SIZE) {
             return Err(ClipassError::Io("file too small or invalid".to_string()));
         }
 
         // Extraction des composants
-        let salt_bytes = &data[0..16];
-        let nonce_bytes = &data[16..28];
-        let ciphertext = &data[28..];
+        let nonce_start = SALT_SIZE;
+        let nonce_end = SALT_SIZE + NONCE_SIZE;
 
-        // 2. Régénération de la clé (doit être identique à save_to_file)
-        let mut key_bytes = [0u8; 32];
-        Argon2::default().hash_password_into(
-            master_password.as_bytes(),
-            salt_bytes,
-            &mut key_bytes
-        )?;
-        let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-        let cipher = Aes256Gcm::new(key);
+        let salt_bytes = &data[..SALT_SIZE];
+        let nonce_bytes = &data[nonce_start..nonce_end];
+        let ciphertext = Vec::from(&data[nonce_end..]);
+
         let nonce = Nonce::from_slice(nonce_bytes);
+        let salt = SaltString::encode_b64(salt_bytes)?;
 
-        // 3. Déchiffrement
-        let decrypted_data = cipher.decrypt(nonce, ciphertext)
-            .map_err(|err| ClipassError::CryptoError(format!("{err}")))?;
-
-        // 4. Désérialisation
-        let vault: Vault = serde_json::from_slice(&decrypted_data).map_err(|err| ClipassError::SerdeError(format!("{err}")))?;
-        if cfg!(debug_assertions) {
-            println!("nonce: {:?}", nonce_bytes);
-            println!("salt: {:?}", vault.salt);
-            println!("key: {:?}", key);
-        }
-
-        Ok(vault)
+        let key = crypto::derive_key(master_password, &salt)?;
+        let decrypted = crypto::decrypt_data(&key, &ciphertext, nonce.as_ref())?;
+        let entries: HashMap<String, String> = serde_json::from_slice(&decrypted)?;
+        Ok(Self { salt, key, entries })
     }
 }
