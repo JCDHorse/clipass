@@ -1,5 +1,9 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+
+use rpassword;
+use rpassword::prompt_password;
 use crate::command::Command;
 use crate::error::ClipassError;
 use crate::utils::input_read;
@@ -15,12 +19,12 @@ impl Clipass {
     pub fn new() ->  Result<Self, ClipassError> {
         let path = String::from("test.json");
         let vault: Vault;
+        let pass: String = prompt_password("password: ")?;
         if Path::new(&path).exists() {
-            let pass: String = input_read("password: ")?;
-            vault = Vault::load_from_file(pass.as_str(), path.as_str()).unwrap()
+            vault = Vault::load_from_file(pass.as_str(), path.as_str())?;
         }
         else {
-            vault = Vault::new(None);
+            vault = Vault::new_empty(pass.as_str())?;
         }
         Ok(Self { cli_on: false, vault, path })
     }
@@ -55,6 +59,8 @@ impl Clipass {
                 let e = self.get(&id)?.to_string();
                 Ok(e)
             },
+            Command::Update(id) => self.update(&id),
+            Command::Delete(id) => self.delete(&id),
             Command::New => self.new_entry(),
             Command::List => self.list(),
             Command::Save => self.save(),
@@ -67,8 +73,10 @@ impl Clipass {
         let help_str =
             "commands: \n\
             \t- list: list all entries\n\
-            \t- get <id>: get entry by id\n\
             \t- new: new entry\n\
+            \t- get <id>: get entry by id\n\
+            \t- update <id>\n\
+            \t- delete <id> \n\
             \t- save: save to file\n\
             \t- help: show this help\n\
             \t- quit";
@@ -85,6 +93,17 @@ impl Clipass {
 
     pub fn get(&self, id: &String) -> Result<&String, ClipassError> {
         Ok(self.vault.get_value(id)?)
+    }
+
+    pub fn update(&mut self, id: &String) -> Result<String, ClipassError> {
+        let new_value: String = input_read("new value: ")?;
+        self.vault.update(id, new_value.as_str())?;
+        Ok(format!("updated {id}"))
+    }
+
+    pub fn delete(&mut self, id: &String) -> Result<String, ClipassError> {
+        self.vault.delete_entry(id)?;
+        Ok(format!("deleted {id}"))
     }
 
     pub fn new_entry(&mut self) -> Result<String, ClipassError> {
@@ -107,11 +126,8 @@ impl Clipass {
     }
 
     pub fn save(&mut self) -> Result<String, ClipassError> {
-        let pass: String= input_read("password: ")?;
-        match self.vault.crypt_to_file(pass.as_str(), self.path.as_str()) {
-            Ok(_) => {},
-            Err(err) => return Err(ClipassError::NotFound),
-        }
+        let pass: String = rpassword::prompt_password("password: ")?;
+        self.vault.crypt_to_file(self.path.as_str())?;
         Ok("saved".to_string())
     }
 }

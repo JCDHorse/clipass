@@ -5,7 +5,9 @@ pub enum Command {
     Help,
     List,
     Get(String),
+    Update(String),
     New,
+    Delete(String),
     Save,
     Quit,
 }
@@ -30,6 +32,16 @@ impl FromStr for Command {
             "new" => Ok(Command::New),
             "save" => Ok(Command::Save),
             "quit" => Ok(Command::Quit),
+            "delete" => {
+                let arg = parts.next()
+                    .ok_or(ClipassError::InvalidCommand("missing argument for 'delete'".to_string()))?;
+                Ok(Command::Delete(arg.to_string()))
+            },
+            "update" => {
+                let arg = parts.next()
+                    .ok_or(ClipassError::InvalidCommand("missing argument for 'update'".to_string()))?;
+                Ok(Command::Update(arg.to_string()))
+            },
             _ => Err(ClipassError::InvalidCommand(cmd_name.to_string()))
         }
     }
