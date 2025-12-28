@@ -13,12 +13,12 @@ where
 {
     input_read_with(ask_msg, &mut io::stdin(), &mut io::stdout())
 }
+
 pub fn input_read_with<T, R, W>(ask_msg: &str, reader: &mut R, writer: &mut W) -> Result<T, ClipassError>
 where
     T: FromStr,
     R: Read,
     W: Write,
-    ClipassError: From<io::Error> + From<T::Err>,
     <T as FromStr>::Err: std::fmt::Display,
 {
     use std::io::BufRead;

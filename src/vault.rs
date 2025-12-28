@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use aes_gcm::aead::consts::U12;
+use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::Nonce;
 use aes_gcm::aead::rand_core::RngCore;
 use argon2::password_hash::{Salt, SaltString};
@@ -18,7 +19,7 @@ const NONCE_SIZE: usize = 12;
 pub struct Vault {
     entries: HashMap<String, String>,
     salt: SaltString,
-    key: crypto::Key,
+    key: Key,
 }
 
 impl Vault {
@@ -77,6 +78,16 @@ impl Vault {
         Ok(())
     }
 
+    fn crypt_write(path: &str, salt_bytes: &[u8; 32], nonce: &GenericArray<u8, U12>,
+                   ciphertext: &Vec<u8>) -> Result<(), ClipassError>
+    {
+        let mut file = File::create(path)?;
+        file.write_all(salt_bytes)?;
+        file.write_all(nonce)?;
+        file.write_all(ciphertext)?;
+        Ok(())
+    }
+
     pub fn crypt_to_file(&self, path: &str) -> Result<(), ClipassError> {
         let entries_json = serde_json::to_vec(&self.entries)?;
 
@@ -86,12 +97,7 @@ impl Vault {
         let (ciphertext, nonce) =
             crypto::encrypt_data(&self.key, &entries_json)?;
 
-        let mut file = File::create(path)?;
-
-        file.write_all(&salt_bytes)?;
-        file.write_all(&nonce)?;
-        file.write_all(&ciphertext)?;
-
+        Self::crypt_write(path, &salt_bytes, &nonce, &ciphertext)?;
         Ok(())
     }
 

@@ -16,21 +16,20 @@ pub struct Clipass {
 }
 
 impl Clipass {
-    pub fn new() ->  Result<Self, ClipassError> {
-        let path = String::from("test.json");
+    pub fn new(path: &str) ->  Result<Self, ClipassError> {
         let vault: Vault;
         let pass: String = prompt_password("password: ")?;
         if Path::new(&path).exists() {
-            vault = Vault::load_from_file(pass.as_str(), path.as_str())?;
+            vault = Vault::load_from_file(pass.as_str(), path)?;
         }
         else {
             vault = Vault::new_empty(pass.as_str())?;
         }
-        Ok(Self { cli_on: false, vault, path })
+        Ok(Self { cli_on: false, vault, path: path.to_string() })
     }
 
     pub fn command_line(&mut self) {
-        println!("clipass 0.0.1");
+        println!("clipass 0.1");
         println!("help to show available commands");
         self.cli_on = true;
         while self.cli_on {
@@ -72,14 +71,14 @@ impl Clipass {
     pub fn help(&self) -> Result<String, ClipassError> {
         let help_str =
             "commands: \n\
-            \t- list: list all entries\n\
-            \t- new: new entry\n\
-            \t- get <id>: get entry by id\n\
-            \t- update <id>\n\
-            \t- delete <id> \n\
-            \t- save: save to file\n\
-            \t- help: show this help\n\
-            \t- quit";
+            \r  - list: list all entries\n\
+            \r  - new: new entry\n\
+            \r  - get <id>: get entry by id\n\
+            \r  - update <id>\n\
+            \r  - delete <id> \n\
+            \r  - save: save to file\n\
+            \r  - help: show this help\n\
+            \r  - quit";
         Ok(help_str.to_string())
     }
 
@@ -96,6 +95,9 @@ impl Clipass {
     }
 
     pub fn update(&mut self, id: &String) -> Result<String, ClipassError> {
+        if !self.vault.contains_key(id) {
+            return Err(ClipassError::NotFound(id.clone()));
+        }
         let new_value: String = input_read("new value: ")?;
         self.vault.update(id, new_value.as_str())?;
         Ok(format!("updated {id}"))

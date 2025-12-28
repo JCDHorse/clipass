@@ -12,7 +12,14 @@ mod vault;
 
 fn main() -> Result<(), ClipassError> {
     let args: Vec<String> = env::args().collect();
-    let mut clipass = Clipass::new()?;
+    println!("{:?}", args);
+
+    let path= match args.get(1) {
+        Some(p) => p.clone(),
+        None => "test.json".to_string(),
+    };
+
+    let mut clipass = Clipass::new(path.as_str())?;
     clipass.command_line();
     Ok(())
 }
