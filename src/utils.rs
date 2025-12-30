@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::io;
 use std::io::{Read, Write};
 use std::str::FromStr;

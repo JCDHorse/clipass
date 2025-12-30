@@ -1,17 +1,17 @@
+use aes_gcm::aead::consts::U12;
+use aes_gcm::aead::generic_array::GenericArray;
+use aes_gcm::aead::rand_core::RngCore;
+use aes_gcm::Nonce;
+use argon2::password_hash::SaltString;
+use rand::thread_rng;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
-use aes_gcm::aead::consts::U12;
-use aes_gcm::aead::generic_array::GenericArray;
-use aes_gcm::Nonce;
-use aes_gcm::aead::rand_core::RngCore;
-use argon2::password_hash::{Salt, SaltString};
-use rand::thread_rng;
+use std::io::Write;
 
-use crate::error::ClipassError;
 use crate::crypto;
 use crate::crypto::Key;
+use crate::error::ClipassError;
 
 const SALT_SIZE: usize = 32;
 const NONCE_SIZE: usize = 12;
