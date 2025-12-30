@@ -1,3 +1,5 @@
 # TODO
-- set the vault file as command line argument
-- 
+- vault file header
+- configuration file
+- command line arguments
+- sessions
