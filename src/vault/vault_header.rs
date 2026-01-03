@@ -5,7 +5,7 @@ use crate::crypto::KdfParams;
 use crate::error::ClipassError;
 use crate::vault::{NONCE_SIZE, SALT_SIZE};
 
-/**
+/*
         *** CLIPASS VAULT FILE v2 ***
 *****************************************
                   HEADER
@@ -22,7 +22,8 @@ use crate::vault::{NONCE_SIZE, SALT_SIZE};
   - Nonce {12}          : AES-GCM nonce
 ------------------------------------------
                   CIPHERTEXT
-*****************************************/
+****************************************
+*/
 
 const MAGIC: &[u8; 4] = b"CLIP";
 const VERSION: u16 = 2;
