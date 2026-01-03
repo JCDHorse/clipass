@@ -18,11 +18,30 @@ impl Key {
     }
 }
 
-pub fn derive_key(password: &str, salt: &SaltString) -> Result<Key, ClipassError> {
+#[derive(Clone, Debug)]
+pub struct KdfParams {
+    pub memory_cost: u32,     // Argon2 m_cost (en KB)
+    pub time_cost: u32,       // Argon2 t_cost (iterations)
+    pub parallelism:  u32,     // Argon2 p_cost (threads)
+}
+
+impl Default for KdfParams {
+    fn default() -> Self {
+        Self {
+            memory_cost: 65536,  // 64 MB
+            time_cost: 3,
+            parallelism: 4,
+        }
+    }
+}
+
+
+pub fn derive_key(password: &str, salt: &SaltString, o_kdf_params: Option<KdfParams>) -> Result<(Key, KdfParams), ClipassError> {
+    let kdf_params = o_kdf_params.unwrap_or_else(|| KdfParams::default());
     let argon2 = Argon2::new(
         argon2::Algorithm::Argon2id,
         argon2::Version::V0x13,
-        argon2::Params::new(65536, 3, 4, None)?
+        argon2::Params::new(kdf_params.memory_cost, kdf_params.time_cost, kdf_params.parallelism, None)?
     );
 
     let hash = argon2.hash_password(password.as_bytes(), salt)?;
@@ -36,7 +55,7 @@ pub fn derive_key(password: &str, salt: &SaltString) -> Result<Key, ClipassError
     let key = Key::new(*GenericArray::from_slice(&key_array));
 
     key_array.zeroize();
-    Ok(key)
+    Ok((key, kdf_params))
 }
 
 pub fn encrypt_data(key: &Key, plaintext: &Vec<u8>)

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 
 use rpassword;
@@ -7,7 +5,7 @@ use rpassword::prompt_password;
 use crate::command::Command;
 use crate::error::ClipassError;
 use crate::utils::input_read;
-use crate::vault::Vault;
+use crate::vault::vault::Vault;
 
 pub struct Clipass {
     cli_on: bool,
@@ -69,7 +67,7 @@ impl Clipass {
 
     // List all commands
     pub fn help(&self) -> Result<String, ClipassError> {
-        let help_str =
+        static HELP_STR: &str =
             "commands: \n\
             \r  - list: list all entries\n\
             \r  - new: new entry\n\
@@ -79,13 +77,13 @@ impl Clipass {
             \r  - save: save to file\n\
             \r  - help: show this help\n\
             \r  - quit";
-        Ok(help_str.to_string())
+        Ok(HELP_STR.to_string())
     }
 
     pub fn list(&self) -> Result<String, ClipassError> {
         let mut listing = String::new();
         for entry in self.vault.get_all() {
-            listing.push_str(format!("- {}: ******\n", entry.0).as_str());
+            listing.push_str(format!(" - {}: ******\n", entry.0).as_str());
         }
         Ok(listing.to_string())
     }
@@ -128,7 +126,6 @@ impl Clipass {
     }
 
     pub fn save(&mut self) -> Result<String, ClipassError> {
-        let pass: String = rpassword::prompt_password("password: ")?;
         self.vault.crypt_to_file(self.path.as_str())?;
         Ok("saved".to_string())
     }

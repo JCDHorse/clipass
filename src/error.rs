@@ -1,8 +1,9 @@
 use std::fmt;
-use std::fmt::{format, Formatter};
-use std::io::{Error, ErrorKind};
+use std::fmt::{write, Formatter};
+use std::io::Error;
 use std::convert::Infallible;
 use std::num::ParseIntError;
+use std::time::SystemTimeError;
 
 #[derive(Debug)]
 pub enum ClipassError {
@@ -15,6 +16,8 @@ pub enum ClipassError {
     Argon2Error(String),
     CryptoError(String),
     SerdeError(String),
+    TimeError(String),
+    HeaderError(String),
 }
 
 impl fmt::Display for ClipassError {
@@ -29,6 +32,8 @@ impl fmt::Display for ClipassError {
             ClipassError::Argon2Error(err) => write!(f, "argon2 error: {err}"),
             ClipassError::CryptoError(err) => write!(f, "crypto error: {err}"),
             ClipassError::SerdeError(err) => write!(f, "serde error: {err}"),
+            ClipassError::TimeError(err) => write!(f, "time error: {err}"),
+            ClipassError::HeaderError(err) => write!(f, "header error: {err}"),
         }
     }
 }
@@ -81,5 +86,11 @@ impl From<aes_gcm::Error> for ClipassError {
 impl From<argon2::password_hash::Error> for ClipassError {
     fn from(value: argon2::password_hash::Error) -> Self {
         ClipassError::CryptoError(format!("{value}"))
+    }
+}
+
+impl From<SystemTimeError> for ClipassError {
+    fn from(value: SystemTimeError) -> Self {
+       ClipassError::TimeError(format!("{value}"))
     }
 }

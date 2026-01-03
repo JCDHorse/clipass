@@ -1,6 +1,6 @@
 use tempfile::NamedTempFile;
 use clipass::error::ClipassError;
-use clipass::vault::Vault;
+use clipass::vault::vault::Vault;
 
 #[test]
 fn vault_encrypt_decrypt_roundtrip() -> Result<(), ClipassError> {

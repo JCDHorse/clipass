@@ -1,23 +1,23 @@
-use aes_gcm::aead::consts::U12;
-use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::rand_core::RngCore;
-use aes_gcm::Nonce;
 use argon2::password_hash::SaltString;
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
-
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::crypto;
-use crate::crypto::Key;
+use crate::crypto::{KdfParams, Key};
 use crate::error::ClipassError;
+use crate::vault::{NONCE_SIZE, SALT_SIZE};
+use crate::vault::vault_header::VaultHeader;
 
-const SALT_SIZE: usize = 32;
-const NONCE_SIZE: usize = 12;
+
 
 pub struct Vault {
     entries: HashMap<String, String>,
+    kdf_params: KdfParams,
+    created_at: SystemTime,
     salt: SaltString,
     key: Key,
 }
@@ -27,13 +27,14 @@ impl Vault {
         let mut salt_bytes = [0u8; 32];
         thread_rng().fill_bytes(&mut salt_bytes);
         let salt = SaltString::encode_b64(&salt_bytes)?;
-        let key = crypto::derive_key(master_password, &salt)?;
-        Ok(Self {entries: HashMap::new(), salt, key})
+        let (key, kdf_params) = crypto::derive_key(master_password, &salt, None)?;
+        let created_at = SystemTime::now();
+        Ok(Self {entries: HashMap::new(), created_at, salt, key, kdf_params})
     }
 
-    pub fn new(entries: HashMap<String, String>, salt: SaltString, key: Key) -> Self {
-        Self { entries, salt, key }
-    }
+    // pub fn new(entries: HashMap<String, String>, salt: SaltString, key: Key) -> Self {
+    //     Self { entries, salt, key }
+    // }
 
     pub fn new_entry(&mut self, key: &str, value: &str)
         -> Result<(), ClipassError>
@@ -49,7 +50,7 @@ impl Vault {
         -> Result<(), ClipassError>
     {
         match self.entries.remove_entry(key) {
-            Some(v) => Ok(()),
+            Some(_) => Ok(()),
             None => Err(ClipassError::NotFound(key.to_string())),
         }
     }
@@ -78,12 +79,11 @@ impl Vault {
         Ok(())
     }
 
-    fn crypt_write(path: &str, salt_bytes: &[u8; 32], nonce: &GenericArray<u8, U12>,
+    fn crypt_write(path: &str, header_bytes: &Vec<u8>,
                    ciphertext: &Vec<u8>) -> Result<(), ClipassError>
     {
         let mut file = File::create(path)?;
-        file.write_all(salt_bytes)?;
-        file.write_all(nonce)?;
+        file.write_all(header_bytes)?;
         file.write_all(ciphertext)?;
         Ok(())
     }
@@ -97,7 +97,13 @@ impl Vault {
         let (ciphertext, nonce) =
             crypto::encrypt_data(&self.key, &entries_json)?;
 
-        Self::crypt_write(path, &salt_bytes, &nonce, &ciphertext)?;
+        let now = SystemTime::now();
+        let created_at = self.created_at.duration_since(UNIX_EPOCH)?.as_secs();
+        let modified_at= now.duration_since(UNIX_EPOCH)?.as_secs();
+
+        let header = VaultHeader::new(self.salt.clone(), nonce, created_at, modified_at, self.kdf_params.clone());
+        let header_bytes = header.serialize()?;
+        Self::crypt_write(path, &header_bytes, &ciphertext)?;
         Ok(())
     }
 
@@ -112,20 +118,16 @@ impl Vault {
             return Err(ClipassError::Io("file too small or invalid".to_string()));
         }
 
-        // Extraction des composants
-        let nonce_start = SALT_SIZE;
-        let nonce_end = SALT_SIZE + NONCE_SIZE;
+        let header = VaultHeader::deserialize(&data)?;
+        let salt = header.salt;
+        let nonce = header.nonce;
+        let ciphertext = Vec::from(&data[VaultHeader::HEADER_SIZE..]);
+        let kdf_params = header.kdf;
+        let created_at = UNIX_EPOCH + Duration::from_secs(header.created_at);
 
-        let salt_bytes = &data[..SALT_SIZE];
-        let nonce_bytes = &data[nonce_start..nonce_end];
-        let ciphertext = Vec::from(&data[nonce_end..]);
-
-        let nonce = Nonce::from_slice(nonce_bytes);
-        let salt = SaltString::encode_b64(salt_bytes)?;
-
-        let key = crypto::derive_key(master_password, &salt)?;
+        let (key, _) = crypto::derive_key(master_password, &salt, Some(kdf_params.clone()))?;
         let decrypted = crypto::decrypt_data(&key, &ciphertext, nonce.as_ref())?;
         let entries: HashMap<String, String> = serde_json::from_slice(&decrypted)?;
-        Ok(Self { salt, key, entries })
+        Ok(Self { salt, key, entries, kdf_params, created_at })
     }
 }
