@@ -1,16 +1,17 @@
-use aes_gcm::aead::consts::{U12};
+use std::io::{Cursor, Read};
+use aes_gcm::aead::consts::U12;
 use aes_gcm::Nonce;
 use argon2::password_hash::SaltString;
-use crate::crypto::KdfParams;
+use crate::crypto::{KdfParams, KDF_SIZE};
 use crate::error::ClipassError;
 use crate::vault::{NONCE_SIZE, SALT_SIZE};
 
 /*
-        *** CLIPASS VAULT FILE v2 ***
+        *** CLIPASS VAULT FILE v3 ***
 *****************************************
                   HEADER
   - Magic number {4}    : "CLIP"
-  - Version {2}         : 0x0002
+  - Version {2}         : 0x0003
   - Header Size {2}     : ?HEADER_SIZE
   - Created at {8}
   - Modified at {8}
@@ -25,11 +26,17 @@ use crate::vault::{NONCE_SIZE, SALT_SIZE};
 ****************************************
 */
 
-const MAGIC: &[u8; 4] = b"CLIP";
-const VERSION: u16 = 2;
+const MAGIC_SIZE: usize = 4;
+const MAGIC: [u8; MAGIC_SIZE] = *b"CLIP";
+const VERSION: u16 = 3;
 const PRE_HEADER_SIZE: usize = 8; // MAGIC (4) + VERSION (2) + HEADER_SIZE (2)
-
-const KDF_SIZE: usize = 12;
+const TIMESTAMP_SIZE: usize = 8;
+pub const HEADER_SIZE: usize =
+    PRE_HEADER_SIZE +
+        TIMESTAMP_SIZE * 2 + // created_at + modified_at
+        KDF_SIZE +
+        SALT_SIZE +
+        NONCE_SIZE;
 
 pub struct VaultHeader {
     pub created_at: u64,
@@ -40,22 +47,15 @@ pub struct VaultHeader {
 }
 
 impl VaultHeader {
-    pub const HEADER_SIZE: usize =
-        PRE_HEADER_SIZE +
-        8 +  // created_at
-        8 +  // modified_at
-        KDF_SIZE +
-        SALT_SIZE +
-        NONCE_SIZE;
     pub fn new(salt: SaltString, nonce: Nonce<U12>, created_at: u64, modified_at: u64, kdf: KdfParams) -> Self {
         Self { created_at, modified_at, kdf,  nonce, salt }
     }
     pub fn serialize(&self) -> Result<Vec<u8>, ClipassError> {
-        let mut buf = Vec::with_capacity(Self::HEADER_SIZE);
+        let mut buf = Vec::with_capacity(HEADER_SIZE);
 
-        buf.extend_from_slice(MAGIC);
+        buf.extend_from_slice(&MAGIC);
         buf.extend_from_slice(&VERSION.to_le_bytes());
-        buf.extend_from_slice(&(Self::HEADER_SIZE as u16).to_le_bytes());
+        buf.extend_from_slice(&(HEADER_SIZE as u16).to_le_bytes());
 
         // Timestamp
         buf.extend_from_slice(&self.created_at.to_le_bytes());
@@ -74,43 +74,59 @@ impl VaultHeader {
 
         Ok(buf)
     }
-
     pub fn deserialize(data: &Vec<u8>) -> Result<Self, ClipassError> {
-        const CREATED_AT_START: usize = PRE_HEADER_SIZE;
-        const CREATED_AT_END: usize = CREATED_AT_START + 8;
-        const MODIFIED_AT_START: usize = CREATED_AT_END;
-        const MODIFIED_AT_END: usize = MODIFIED_AT_START + 8;
-        const KDF_START: usize = PRE_HEADER_SIZE + 16;
-        const KDF_END: usize = KDF_START + KDF_SIZE;
-        const SALT_START: usize = KDF_END;
-        const SALT_END: usize = SALT_START + SALT_SIZE;
-        const NONCE_START: usize = SALT_END;
-        const NONCE_END: usize = NONCE_START + NONCE_SIZE;
+        let mut cursor = Cursor::new(data);
 
-        let magic: &[u8] = &data[0..4];
+        // --- helpers locaux ---
+        fn read_exact<const N: usize>(cursor: &mut Cursor<&Vec<u8>>) -> Result<[u8; N], ClipassError> {
+            let mut buf = [0u8; N];
+            cursor.read_exact(&mut buf)?;
+            Ok(buf)
+        }
+
+        // --- magic ---
+        let magic = read_exact::<4>(&mut cursor)?;
         if magic != MAGIC {
             return Err(ClipassError::HeaderError("bad magic".to_string()));
         }
 
-        // TODO : Remove all these .unwrap()
-
-        let version = u16::from_le_bytes(data[4..6].try_into().unwrap());
+        // --- version ---
+        let version = u16::from_le_bytes(read_exact::<2>(&mut cursor)?);
         if version != VERSION {
-            return Err(ClipassError::HeaderError("incompatible version".to_string()))
+            return Err(ClipassError::HeaderError("incompatible version".to_string()));
         }
 
-        let created_at = u64::from_le_bytes(data[CREATED_AT_START..CREATED_AT_END].try_into().unwrap());
-        let modified_at = u64::from_le_bytes(data[MODIFIED_AT_START..MODIFIED_AT_END].try_into().unwrap());
+        let _header_size = u16::from_le_bytes(read_exact::<2>(&mut cursor)?);
 
-        let kdf_bytes = &data[KDF_START .. KDF_END];
-        let memory_cost: u32 = u32::from_le_bytes(kdf_bytes[0..4].try_into().unwrap());
-        let time_cost: u32 = u32::from_le_bytes(kdf_bytes[4..8].try_into().unwrap());
-        let parallelism: u32 = u32::from_le_bytes(kdf_bytes[8..12].try_into().unwrap());
-        let kdf = KdfParams { memory_cost, time_cost, parallelism };
+        // --- created / modified ---
+        let created_at = u64::from_le_bytes(read_exact::<8>(&mut cursor)?);
+        let modified_at = u64::from_le_bytes(read_exact::<8>(&mut cursor)?);
 
-        let salt = SaltString::encode_b64(&data[SALT_START..SALT_END])?;
-        let nonce = Nonce::from_slice(&data[NONCE_START..NONCE_END]).clone();
+        // --- KDF ---
+        let memory_cost = u32::from_le_bytes(read_exact::<4>(&mut cursor)?);
+        let time_cost = u32::from_le_bytes(read_exact::<4>(&mut cursor)?);
+        let parallelism = u32::from_le_bytes(read_exact::<4>(&mut cursor)?);
 
-        Ok(Self { kdf, created_at, modified_at, salt, nonce })
+        let kdf = KdfParams {
+            memory_cost,
+            time_cost,
+            parallelism,
+        };
+
+        // --- salt ---
+        let salt_bytes = read_exact::<SALT_SIZE>(&mut cursor)?;
+        let salt = SaltString::encode_b64(&salt_bytes)?;
+
+        // --- nonce ---
+        let nonce_bytes = read_exact::<NONCE_SIZE>(&mut cursor)?;
+        let nonce = Nonce::from_slice(&nonce_bytes).clone();
+
+        Ok(Self {
+            kdf,
+            created_at,
+            modified_at,
+            salt,
+            nonce,
+        })
     }
 }

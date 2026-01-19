@@ -1,11 +1,12 @@
 use std::path::Path;
-
 use rpassword;
 use rpassword::prompt_password;
 use crate::command::Command;
 use crate::error::ClipassError;
 use crate::utils::input_read;
 use crate::vault::vault::Vault;
+
+const CLIPASS_VERSION: &str = "0.3.0-alpha";
 
 pub struct Clipass {
     cli_on: bool,
@@ -15,6 +16,7 @@ pub struct Clipass {
 
 impl Clipass {
     pub fn new(path: &str) ->  Result<Self, ClipassError> {
+        println!("clipass v{CLIPASS_VERSION}");
         let vault: Vault;
         let pass: String = prompt_password("password: ")?;
         if Path::new(&path).exists() {
@@ -27,7 +29,8 @@ impl Clipass {
     }
 
     pub fn command_line(&mut self) {
-        println!("clipass 0.1");
+        println!("vault created at:\t\t{}", self.vault.created_at().format("%c"));
+        println!("vault modified at:\t\t{}", self.vault.modified_at().format("%c"));
         println!("help to show available commands");
         self.cli_on = true;
         while self.cli_on {

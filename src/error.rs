@@ -1,7 +1,7 @@
-use std::fmt;
-use std::fmt::{write, Formatter};
-use std::io::Error;
 use std::convert::Infallible;
+use std::fmt;
+use std::fmt::Formatter;
+use std::io::Error;
 use std::num::ParseIntError;
 use std::time::SystemTimeError;
 

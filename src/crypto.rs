@@ -1,6 +1,6 @@
 use aes_gcm::aead::generic_array::{typenum, GenericArray};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use aes_gcm::aead::Aead;
+use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::aead::consts::U12;
 use argon2::{Argon2, PasswordHasher};
 use argon2::password_hash::rand_core::RngCore;
@@ -18,6 +18,7 @@ impl Key {
     }
 }
 
+pub const KDF_SIZE: usize = 12;
 #[derive(Clone, Debug)]
 pub struct KdfParams {
     pub memory_cost: u32,     // Argon2 m_cost (en KB)
@@ -58,24 +59,25 @@ pub fn derive_key(password: &str, salt: &SaltString, o_kdf_params: Option<KdfPar
     Ok((key, kdf_params))
 }
 
-pub fn encrypt_data(key: &Key, plaintext: &Vec<u8>)
-    -> Result<(Vec<u8>, GenericArray<u8, U12>), ClipassError>
-{
-    let cipher = Aes256Gcm::new(&key.0);
+pub fn generate_nonce() -> Nonce<U12> {
     let mut nonce_bytes = [0u8; 12];
     thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from(nonce_bytes);
-    let ciphertext = cipher.encrypt(&nonce, plaintext.as_ref())?;
-    Ok((ciphertext, nonce))
+    return Nonce::from(nonce_bytes);
 }
 
-pub fn decrypt_data(key: &Key, ciphertext: &Vec<u8>, nonce: &[u8; 12])
+pub fn encrypt_data(key: &Key, nonce: &Nonce<U12>, plaintext: &[u8], header_bytes: &[u8])
+    -> Result<Vec<u8>, ClipassError>
+{
+    let cipher = Aes256Gcm::new(&key.0);
+    let ciphertext = cipher.encrypt(&nonce, Payload { msg: plaintext, aad: header_bytes })?;
+    Ok(ciphertext)
+}
+
+pub fn decrypt_data(key: &Key, nonce: &Nonce<U12>, ciphertext: &[u8], header_bytes: &[u8])
     -> Result<Vec<u8>, ClipassError>
 {
     let cipher = Aes256Gcm::new(&key.0);
     let nonce = GenericArray::from_slice(nonce);
-    match cipher.decrypt(nonce, ciphertext.as_ref()) {
-        Ok(v) => Ok(v),
-        Err(err) => Err(ClipassError::CryptoError(format!("{err}"))),
-    }
+    let plaintext = cipher.decrypt(nonce, Payload { msg: ciphertext, aad: header_bytes })?;
+    Ok(plaintext)
 }

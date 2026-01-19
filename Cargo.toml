@@ -1,6 +1,6 @@
 [package]
 name = "clipass"
-version = "0.1.0"
+version = "0.2.0-alpha"
 edition = "2024"
 
 [dependencies]
@@ -11,6 +11,8 @@ argon2 = "0.5"
 rand = "0.8" # Pour générer le sel (salt) et le nonce
 rpassword = "7.4"
 zeroize = { version = "1.8", features = ["derive"] }
+chrono = "0.4.42"
+num-traits = "0.2"
 
 
 [dev-dependencies]
